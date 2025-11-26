@@ -14,7 +14,8 @@
 7. [Ejecución y Pruebas](#ejecución-y-pruebas)
 8. [Datos Generados (CSV)](#datos-generados-csv)
 9. [Funcionalidades Pendientes](#funcionalidades-pendientes)
-10. [Migración a Hardware Real](#migración-a-hardware-real)
+10. [Guía de Instalación y Puesta en Marcha](#guía-de-instalación-y-puesta-en-marcha)
+11. [Visualización Rápida de la Arquitectura de Conexión](#visualización-rápida-de-la-arquitectura-de-conexión)
 
 ---
 
@@ -883,141 +884,838 @@ El archivo CSV proporciona:
 - [ ] Rotación de logs por tamaño/fecha
 - [ ] Tests unitarios automatizados
 
-## Migración a Hardware Real
+## Guía de Instalación y Puesta en Marcha
 
-### 🔌 Cuando esté listo el hardware...
+### 🎯 Objetivo
 
-El sistema está diseñado para una **migración directa** a GPIO real con **cambios mínimos**.
+Esta guía te lleva paso a paso desde cero hasta tener tu sistema de riego funcionando, explicado de forma simple y práctica.
 
-#### Paso 1: Instalar RPi.GPIO
+---
 
-En la Raspberry Pi 4, instalar la biblioteca GPIO:
+## 📦 Paso 1: Lista de Materiales
+
+### Hardware Electrónico
+
+| Componente | Especificación | Precio Ref. (ARG 2025) |
+|------------|----------------|------------------------|
+| **Raspberry Pi 4** | 2GB RAM o superior + Kit (fuente, case, SD) | $80.000 - $120.000 |
+| **MicroSD** | 16GB mínimo (32GB recomendado), Clase 10 | Incluido en kit |
+| **Adaptador microSD → USB** | Para grabar desde tu PC | $2.000 - $3.000 |
+| **Módulo Relé** | 4 canales, 5V, opto-aislado | $3.000 - $5.000 |
+| **Cables Dupont** | Kit macho-hembra (40 cables) | $2.000 - $3.000 |
+
+### Hardware Hidráulico
+
+| Componente | Especificación | Precio Ref. (ARG 2025) |
+|------------|----------------|------------------------|
+| **Electroválvulas 12V NC** | 12V DC, rosca 1/2", normalmente cerradas (x3) | $8.000 - $15.000 c/u |
+| **Fuente 12V** | 12V DC, mínimo 2A | $5.000 - $8.000 |
+| **Manguera flexible** | 1/2", 10 metros | $4.000 - $6.000 |
+| **Conectores y abrazaderas** | Varios | $3.000 - $5.000 |
+| **Teflón** | Para roscas | $500 |
+
+**💰 Total estimado: $100.000 - $150.000 ARS**
+
+### Periféricos (Solo Configuración Inicial)
+
+- Monitor + cable HDMI (prestado o temporal)
+- Teclado USB (prestado o temporal)
+- Mouse USB (opcional)
+
+---
+
+## 🔧 Paso 2: Preparar la Raspberry Pi
+
+### 2.1 Instalar Raspberry Pi OS en la MicroSD
+
+**Desde tu PC (Windows/Mac/Linux):**
+
+1. **Insertar microSD** en adaptador USB → Conectar a tu PC
+
+2. **Descargar Raspberry Pi Imager:**
+   - Web oficial: https://www.raspberrypi.com/software/
+   - Instalar en tu PC
+
+3. **Grabar el sistema operativo:**
+   - Abrir Raspberry Pi Imager
+   - **Choose Device:** Raspberry Pi 4
+   - **Choose OS:** Raspberry Pi OS (32-bit)
+   - **Choose Storage:** Tu microSD
+
+4. **Configuración avanzada** (click en ⚙️):
+   ```
+   ✅ Set hostname: raspberrypi
+   ✅ Enable SSH: Sí (con contraseña)
+   ✅ Set username: pi
+   ✅ Set password: [tu contraseña]
+   ✅ Configure WiFi:
+      SSID: [tu red WiFi]
+      Password: [contraseña WiFi]
+      Country: AR
+   ✅ Set locale:
+      Timezone: America/Argentina/Buenos_Aires
+      Keyboard: es
+   ```
+
+5. **Grabar:** Click en "NEXT" → "YES" → Esperar 10-20 minutos
+
+6. **Expulsar de forma segura** la microSD de tu PC
+
+### 2.2 Primer Arranque
+
+1. **Insertar microSD** en la Raspberry Pi (ranura inferior, hasta "clic")
+2. **Conectar:**
+   - Cable HDMI → Monitor
+   - Teclado USB
+   - Cable Ethernet (opcional si configuraste WiFi)
+   - **Por último:** Cable USB-C de corriente
+
+3. **Arranque automático:**
+   - LED rojo fijo (alimentación)
+   - LED verde parpadeando (actividad)
+   - Pantalla muestra arranque de Linux
+
+4. **Configuración inicial:**
+   - Si configuraste WiFi en Imager → arranca directo al escritorio
+   - Si no → usar asistente de configuración
+
+5. **Verificar conexión a Internet:**
+   ```bash
+   # Abrir terminal y probar:
+   ping -c 4 google.com
+   ```
+
+---
+
+## ⚡ Paso 3: Conexión del Hardware
+
+### 3.1 Identificar Pines GPIO
+
+**Esquema de pines Raspberry Pi (vista superior):**
+
+```
+     3.3V  [ 1] [ 2]  5V       ← Alimentación relé
+    GPIO2  [ 3] [ 4]  5V
+    GPIO3  [ 5] [ 6]  GND
+    GPIO4  [ 7] [ 8]  GPIO14
+      GND  [ 9] [10]  GPIO15   ← GND para relé
+   GPIO17  [11] [12]  GPIO18   ← Cantero 1
+   GPIO27  [13] [14]  GND      ← Cantero 2
+   GPIO22  [15] [16]  GPIO23   ← Cantero 3
+     3.3V  [17] [18]  GPIO24
+   GPIO10  [19] [20]  GND
+   ...
+```
+
+**Usaremos:**
+- Pin 2 (5V) → VCC del relé
+- Pin 9 (GND) → GND del relé
+- Pin 11 (GPIO17) → IN1 del relé (Cantero 1)
+- Pin 13 (GPIO27) → IN2 del relé (Cantero 2)
+- Pin 15 (GPIO22) → IN3 del relé (Cantero 3)
+
+### 3.2 Conectar Raspberry Pi → Módulo Relé
+
+**⚠️ Raspberry Pi APAGADA (sin alimentación)**
+
+| Raspberry Pi | Cable | Módulo Relé |
+|--------------|-------|-------------|
+| Pin 2 (5V) | Rojo | VCC |
+| Pin 11 (GPIO17) | Amarillo | IN1 |
+| Pin 13 (GPIO27) | Naranja | IN2 |
+| Pin 15 (GPIO22) | Verde | IN3 |
+| Pin 9 (GND) | Negro | GND |
+
+**Diagrama de conexión:**
+
+```
+Raspberry Pi                    Módulo Relé 4 Canales
+────────────                    ─────────────────────
+
+Pin 2  [5V]  ──[Rojo]─────────→ VCC
+Pin 11 [GPIO17] ──[Amarillo]──→ IN1 (Cantero 1)
+Pin 13 [GPIO27] ──[Naranja]───→ IN2 (Cantero 2)
+Pin 15 [GPIO22] ──[Verde]─────→ IN3 (Cantero 3)
+Pin 9  [GND] ──[Negro]────────→ GND
+```
+
+### 3.3 Conectar Electroválvulas al Relé
+
+**Cada electroválvula se conecta a su relé correspondiente:**
+
+```
+Fuente 12V              Relé 1               Electroválvula 1
+──────────              ──────               ────────────────
+
++12V ─────────────────→ COM
+                        NO ────────────────→ Cable Rojo (+)
+GND ──────────────────────────────────────→ Cable Negro (-)
+
+[Repetir para Relé 2/EV2 y Relé 3/EV3]
+```
+
+**Importante:**
+- Usar pin **NO** (Normalmente Abierto), NO usar NC
+- Todas las electroválvulas comparten el GND de la fuente 12V
+- Ajustar bien los tornillos de los bornes del relé
+
+---
+
+## 💻 Paso 4: Instalación del Software
+
+### 4.1 Actualizar el Sistema
 
 ```bash
-pip3 install RPi.GPIO
+sudo apt update && sudo apt upgrade -y
 ```
 
-#### Paso 2: Modificar Configuración
+### 4.2 Instalar Librería GPIO
 
-Editar `sistema_riego.py` y cambiar la línea:
+```bash
+sudo apt install python3-rpi.gpio -y
+```
 
+**Verificar:**
+```bash
+python3 -c "import RPi.GPIO as GPIO; print('GPIO OK')"
+```
+
+### 4.3 Copiar el Sistema de Riego
+
+**Opción A: Clonar desde repositorio**
+```bash
+cd ~
+git clone [URL_DEL_REPO] AutoriegoPY
+cd AutoriegoPY
+```
+
+**Opción B: Copiar manualmente**
+```bash
+# Desde tu PC:
+scp sistema_riego.py pi@raspberrypi.local:~/
+```
+
+### 4.4 Configurar Modo Hardware
+
+Editar `sistema_riego.py`:
+
+```bash
+nano sistema_riego.py
+```
+
+**Cambiar esta línea:**
 ```python
-# ANTES (modo simulación):
-MODO_SIMULACION = True
-
-# DESPUÉS (modo hardware real):
-MODO_SIMULACION = False
+MODO_SIMULACION = False  # Cambiar de True a False
 ```
 
-**¡Eso es todo!** El resto del código funciona idéntico.
+Guardar: `Ctrl + O`, `Enter`, `Ctrl + X`
 
-#### Paso 3: Ejecutar con Permisos GPIO
+---
+
+## 🧪 Paso 5: Pruebas del Sistema
+
+### 5.1 Prueba Sin Agua (Solo Relés)
 
 ```bash
 sudo python3 sistema_riego.py
 ```
 
-> **Nota:** Se requiere `sudo` para acceder a los pines GPIO de la Raspberry Pi.
+**Verificar:**
+- [ ] Los relés hacen "clic" al activarse
+- [ ] Los LEDs del módulo relé se encienden/apagan
+- [ ] No hay errores en pantalla
 
-### 🔧 Conexión del Hardware
+**Probar riego manual:**
+```
+Seleccione opción: 1
+Cantero: 1
+Duración: 0.1  # 6 segundos (0.1 min)
+```
 
-#### Esquema de Conexión GPIO → Relé
+### 5.2 Prueba con Agua (Conexión Hidráulica)
 
-| Raspberry Pi 4 | Módulo Relé 4 Canales |
-|----------------|----------------------|
-| Pin GPIO 17 | IN1 (Relé 1 - Cantero 1) |
-| Pin GPIO 27 | IN2 (Relé 2 - Cantero 2) |
-| Pin GPIO 22 | IN3 (Relé 3 - Cantero 3) |
-| Pin 5V | VCC |
-| Pin GND | GND |
+1. **Conectar electroválvulas** a las mangueras de riego
+2. **Conectar entrada de agua** al distribuidor
+3. **Abrir llave de paso** lentamente
+4. **Ejecutar riego corto:**
+   ```
+   Opción: 1
+   Cantero: 1
+   Duración: 0.5  # 30 segundos
+   ```
+5. **Verificar:**
+   - [ ] Sale agua del cantero correcto
+   - [ ] Se detiene correctamente
+   - [ ] No hay fugas
 
-#### Esquema de Conexión Relé → Electroválvulas
+---
 
-| Módulo Relé | Electroválvula | Fuente 12V |
-|-------------|----------------|------------|
-| Relé 1 COM | EV1 (+) | - |
-| Relé 1 NO | - | 12V (+) |
-| Relé 2 COM | EV2 (+) | - |
-| Relé 2 NO | - | 12V (+) |
-| Relé 3 COM | EV3 (+) | - |
-| Relé 3 NO | - | 12V (+) |
-| - | EV1/EV2/EV3 (-) | GND (-) |
+## 🤖 Paso 6: Automatización (Opcional)
 
-> **Importante:** Todas las electroválvulas comparten el GND de la fuente 12V.
+### Opción A: Riego Programado con Cron
 
-### ⚠️ Precauciones de Seguridad
+**Editar crontab:**
+```bash
+crontab -e
+```
 
-#### Eléctrica
-- ✅ **Separar completamente** circuitos de 5V (Raspberry), 12V (electroválvulas) y 220V (alimentación)
-- ✅ **Usar módulo relé opto-aislado** para protección de la Raspberry Pi
-- ✅ **NO conectar/desconectar** con sistema energizado
-- ✅ **Verificar polaridad** de fuente 12V antes de conectar
+**Ejemplos de programación:**
+```bash
+# Riego diario a las 8:00 AM (2 minutos por cantero)
+0 8 * * * cd ~/AutoriegoPY && echo "2" | sudo python3 sistema_riego.py >> riego.log 2>&1
 
-#### Hidráulica
-- ✅ **Probar electroválvulas** individualmente con 12V antes de montar
-- ✅ **Verificar todas las conexiones** en seco antes de abrir canilla
-- ✅ **Usar abrazaderas** en todas las uniones de manguera
-- ✅ **Instalar válvula de corte manual** para emergencias
+# Dos riegos diarios (8 AM y 8 PM)
+0 8,20 * * * cd ~/AutoriegoPY && echo "2" | sudo python3 sistema_riego.py >> riego.log 2>&1
+```
 
-#### Operativa
-- ✅ **Hacer pruebas con tiempos cortos** (10-30 segundos) inicialmente
-- ✅ **Supervisar el primer riego** automático completo
-- ✅ **Verificar que los canteros** reciban agua de forma pareja
-- ✅ **Ajustar caudales** en el código según mediciones reales
+### Opción B: Servicio Systemd (Avanzado)
 
-### 📝 Calibración de Caudales (Recomendado)
+Crear servicio:
+```bash
+sudo nano /etc/systemd/system/riego.service
+```
 
-Una vez instalado, **medir el caudal real** de cada línea:
+Contenido:
+```ini
+[Unit]
+Description=Sistema de Riego Automático
+After=network.target
 
-#### Método de Calibración:
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/pi/AutoriegoPY
+ExecStart=/usr/bin/python3 /home/pi/AutoriegoPY/sistema_riego.py
+Restart=always
 
-1. **Regar durante 5 minutos** (tiempo conocido)
-2. **Recolectar el agua** en un recipiente medido
+[Install]
+WantedBy=multi-user.target
+```
+
+Activar:
+```bash
+sudo systemctl enable riego.service
+sudo systemctl start riego.service
+```
+
+---
+
+## 📊 Paso 7: Calibración de Caudales
+
+**Para medición precisa de agua:**
+
+1. **Regar 5 minutos** con un cantero
+2. **Recolectar agua** en un recipiente medido
 3. **Calcular caudal real:**
    ```
-   caudal_real = volumen_recolectado / 5 minutos
+   Ejemplo: Si recolectaste 850 ml en 5 min
+   Caudal = 850 / 5 = 170 ml/min
    ```
 4. **Actualizar en código:**
    ```python
    CANTEROS = {
-       1: {"nombre": "Cantero 1", "gpio": 17, "caudal_ml_min": 175},  # Medido
-       2: {"nombre": "Cantero 2", "gpio": 27, "caudal_ml_min": 182},  # Medido
-       3: {"nombre": "Cantero 3", "gpio": 22, "caudal_ml_min": 178},  # Medido
+       1: {"nombre": "Cantero 1", "gpio": 17, "caudal_ml_min": 170},  # Ajustado
+       2: {"nombre": "Cantero 2", "gpio": 27, "caudal_ml_min": 185},  # Ajustado
+       3: {"nombre": "Cantero 3", "gpio": 22, "caudal_ml_min": 175},  # Ajustado
    }
    ```
 
-### 🧪 Troubleshooting Hardware
+---
 
-| Problema | Posibles Causas | Solución |
-|----------|----------------|----------|
-| Electroválvula no abre | - Sin alimentación 12V<br>- Relé no funciona<br>- Conexión floja | - Verificar voltaje con multímetro<br>- Probar relé con LED<br>- Revisar cables |
-| Caudal muy bajo | - Presión baja<br>- Electroválvula obstruida<br>- Manguera doblada | - Abrir más la canilla<br>- Limpiar electroválvula<br>- Revisar trayectoria |
-| Error de GPIO | - Permisos insuficientes<br>- Pin ya en uso<br>- RPi.GPIO no instalado | - Ejecutar con sudo<br>- Verificar conflictos<br>- Instalar librería |
-| Riego no se detiene | - Código bloqueado<br>- Relé pegado | - Ctrl+C y reiniciar<br>- Reemplazar relé |
+## ❌ Solución de Problemas Comunes
 
-### 📋 Lista de Materiales (Hardware Real)
+### Raspberry Pi No Enciende
 
-#### Electrónica
+**Causas:**
+- Fuente insuficiente (usar 5V 3A oficial)
+- MicroSD mal insertada o corrupta
+- Cable USB-C defectuoso
 
-| Componente | Cantidad | Especificación | Precio Ref. |
-|------------|----------|----------------|-------------|
-| Raspberry Pi 4 | 1 | 2GB RAM o superior | $60-80 USD |
-| Módulo Relé | 1 | 4 canales, 5V, opto-aislado | $5-10 USD |
-| Fuente 12V | 1 | 12V DC, 2A mínimo | $8-12 USD |
-| Fuente Raspberry | 1 | 5V 3A USB-C oficial | $8 USD |
-| Cables Dupont | 10 | Hembra-hembra | $3 USD |
+**Solución:**
+1. Verificar LED rojo encendido
+2. Probar con otra fuente
+3. Reinstalar sistema en microSD
 
-#### Hidráulica
+### Relé No Hace Clic
 
-| Componente | Cantidad | Especificación | Precio Ref. |
-|------------|----------|----------------|-------------|
-| Electroválvula 12V NC | 3 | 12V DC, rosca 1/2" | $10-15 USD c/u |
-| Distribuidor 1→4 | 1 | 1 entrada, 4 salidas | $10-15 USD |
-| Manguera | 10m | Diámetro 1/2" | $5-8 USD |
-| Abrazaderas | 10 | Ajustables | $5 USD |
-| Conectores rápidos | 6 | 1/2" | $8 USD |
+**Causas:**
+- Cables GPIO mal conectados
+- Sin permisos (falta `sudo`)
+- Pin GPIO incorrecto
 
-**Total estimado:** $150-200 USD
+**Solución:**
+```bash
+# Probar manualmente:
+sudo su
+echo "17" > /sys/class/gpio/export
+echo "out" > /sys/class/gpio/gpio17/direction
+echo "1" > /sys/class/gpio/gpio17/value  # Debe hacer clic
+echo "0" > /sys/class/gpio/gpio17/value
+echo "17" > /sys/class/gpio/unexport
+exit
+```
+
+### Electroválvula No Abre (Relé Funciona)
+
+**Causas:**
+- Sin alimentación 12V
+- Conectada a pin NC en vez de NO
+- Electroválvula defectuosa
+
+**Solución:**
+1. Verificar 12V con multímetro
+2. Cambiar cable de NC a NO
+3. Probar electroválvula directo a 12V
+
+### No Sale Agua
+
+**Causas:**
+- Llave de paso cerrada
+- Sin presión de agua
+- Filtro obstruido
+
+**Solución:**
+1. Verificar presión en canilla
+2. Limpiar filtros
+3. Revisar mangueras dobladas
+
+---
+
+## 🔒 Precauciones de Seguridad
+
+### ⚠️ Seguridad Eléctrica
+
+- ✅ Desconectar todo antes de hacer cambios
+- ✅ Separar circuitos: 5V (Raspberry) / 12V (Electroválvulas) / 220V (Alimentación)
+- ✅ Usar módulo relé **opto-aislado**
+- ✅ No tocar cables con corriente
+- ❌ NUNCA conectar 12V directo a GPIO
+
+### ⚠️ Seguridad Hidráulica
+
+- ✅ Instalar válvula de corte manual
+- ✅ Probar en seco antes de conectar agua
+- ✅ Usar abrazaderas en todas las uniones
+- ✅ Verificar no haya pérdidas
+- ✅ Primeras pruebas con tiempos cortos (10-30 seg)
+
+---
+
+## 🎯 Checklist Final
+
+### Antes de Poner en Producción
+
+- [ ] Raspberry Pi arranca correctamente
+- [ ] Conectado a WiFi/Ethernet
+- [ ] Software actualizado (`sudo apt update`)
+- [ ] RPi.GPIO instalado
+- [ ] Conexiones GPIO verificadas
+- [ ] Relés hacen clic al activarse
+- [ ] Electroválvulas abren/cierran
+- [ ] Prueba con agua exitosa
+- [ ] No hay fugas
+- [ ] Caudales calibrados
+- [ ] Logs CSV funcionando
+- [ ] (Opcional) Cron configurado
+
+---
+
+## 📚 Recursos Adicionales
+
+### Documentación
+
+- Guía oficial Raspberry Pi GPIO: https://www.raspberrypi.com/documentation/
+- Python CSV: https://docs.python.org/3/library/csv.html
+- Cron: `man crontab`
+
+### Soporte
+
+- Revisar logs: `tail -f riego_log.csv`
+- Ver estadísticas: Opción 4 del menú
+- Backup de config: `cp sistema_riego.py sistema_riego_backup.py`
+
+---
+
+## 🎓 Resumen de Comandos Útiles
+
+```bash
+# Ejecutar sistema
+sudo python3 sistema_riego.py
+
+# Ver últimos riegos
+tail -20 riego_log.csv
+
+# Editar programación
+crontab -e
+
+# Reiniciar Raspberry
+sudo reboot
+
+# Apagar Raspberry de forma segura
+sudo shutdown -h now
+
+# Ver estado del servicio (si usas systemd)
+sudo systemctl status riego.service
+
+# Ver temperatura de la Raspberry
+vcgencmd measure_temp
+```
+
+---
+
+**⏱️ Tiempo total estimado de instalación: 3-4 horas**
+**💡 Dificultad: Media (con paciencia, cualquiera puede hacerlo)**
+
+---
+
+## Visualización Rápida de la Arquitectura de Conexión
+
+### 🎯 Guía Ultra-Simplificada: Del Humano al Agua
+
+Esta es la explicación más simple posible de cómo funciona todo el sistema, paso a paso, con tus manos.
+
+---
+
+### 🧩 PASO 1 — Comprar o Tener los Elementos
+
+**Con tus manos necesitás:**
+
+- ✔ **Raspberry Pi** (cualquier modelo 3 o 4)
+- ✔ **MicroSD** (16GB o más)
+- ✔ **Adaptador microSD → USB** (para ponerla en tu PC)
+- ✔ **Cargador USB-C** de Raspberry Pi
+- ✔ **Cable HDMI**
+- ✔ **Monitor y teclado** (solo para la primera vez)
+- ✔ **Módulo relé** (4 canales, 5V)
+- ✔ **Cables jumper** (macho-hembra, varios colores)
+- ✔ **Electroválvula 12V** (normalmente cerrada)
+- ✔ **Fuente 12V** (para la electroválvula)
+
+---
+
+### 🧩 PASO 2 — Preparar la microSD DESDE TU PC
+
+**1. Poné la microSD dentro del adaptador**
+
+Físicamente:
+```
+microSD → dentro del adaptador
+adaptador → puerto USB de tu PC
+```
+
+**2. En tu PC bajá Raspberry Pi Imager**
+
+De la web oficial:
+```
+https://www.raspberrypi.com/software/
+```
+
+**3. Abrí el programa Raspberry Pi Imager**
+
+**4. Elegí:**
+```
+Choose OS → Raspberry Pi OS (32-bit)
+Choose Storage → tu microSD
+```
+
+**5. Apretá WRITE**
+
+Raspberry Pi Imager va a instalar Linux en la microSD.
+
+⏱️ Esperá 10-20 minutos
+
+**6. Cuando termine → SACÁS la microSD del adaptador**
+
+⚠️ **Importante:** Expulsar de forma segura antes de sacar
+
+---
+
+### 🧩 PASO 3 — Insertar la microSD en la Raspberry Pi
+
+**Físico:**
+
+1. Agarrás la microSD con los dedos
+2. La metés en la ranura de la Raspberry (abajo, chiquita)
+3. Empujás despacito hasta que haga **"clic"**
+
+```
+    ┌─────────────┐
+    │ Raspberry Pi│
+    │             │
+    └──────┬──────┘
+        ▼
+    ╔═══════╗
+    ║microSD║ ← Insertada
+    ╚═══════╝
+```
+
+---
+
+### 🧩 PASO 4 — Conectar la Raspberry Pi y Arrancar Linux
+
+**Físico:**
+
+1. Conectá el **HDMI** de la Raspberry al monitor
+2. Conectá un **teclado USB** a la Raspberry
+3. Conectá el **cable USB-C** de corriente
+
+**Resultado:**
+- La Raspberry se enciende sola
+- Linux aparece en pantalla
+- **No tocás nada más:** inicia solo
+
+```
+Monitor ←[HDMI]← Raspberry Pi
+                      ↑
+                  [USB-C Power]
+                      ↑
+                   220V ⚡
+```
+
+---
+
+### 🧩 PASO 5 — Configurar Linux por Primera Vez
+
+**Con el teclado:**
+
+1. Elegís **idioma:** Español
+2. Elegís **WiFi** (nombre de tu red y contraseña)
+3. Elegís **zona horaria:** Buenos Aires
+4. Se reinicia
+
+**Listo:** Linux está instalado y funcionando ✅
+
+---
+
+### 🧩 PASO 6 — Crear tu Archivo Python
+
+**En Linux, escribís:**
+
+1. Abrís la **terminal** (ícono negro arriba)
+
+2. Escribís:
+```bash
+nano regar.py
+```
+
+3. En el archivo pegás:
+```python
+import RPi.GPIO as GPIO
+import time
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.OUT)
+
+GPIO.output(17, 1)
+time.sleep(2)
+GPIO.output(17, 0)
+
+GPIO.cleanup()
+```
+
+4. Guardás con:
+```
+CTRL + O
+ENTER
+CTRL + X
+```
+
+**Listo:** Ya tenés tu script ✅
+
+---
+
+### 🧩 PASO 7 — Conectar el Relé al Pin GPIO17
+
+**Físico:**
+
+Con los cables jumper (de colores):
+
+```
+Raspberry Pi Pin 11 (GPIO17) →[Cable Amarillo]→ IN del relé
+Raspberry Pi Pin 9  (GND)    →[Cable Negro]→ GND del relé
+Raspberry Pi Pin 2  (5V)     →[Cable Rojo]→ VCC del relé
+```
+
+**Diagrama visual:**
+
+```
+Raspberry Pi                Módulo Relé
+────────────                ───────────
+
+Pin 2  [5V] ──Rojo────────→ VCC
+Pin 11 [GPIO17] ──Amarillo→ IN
+Pin 9  [GND] ──Negro──────→ GND
+```
+
+**Con tus manos:**
+1. Agarrás un cable amarillo hembra
+2. Lo enchufás en el pin 11 de la Raspberry
+3. El otro extremo lo enchufás en "IN" del relé
+4. Repetís con los cables rojo (5V→VCC) y negro (GND→GND)
+
+---
+
+### 🧩 PASO 8 — Conectar la Electroválvula al Relé
+
+**Físico (lado de potencia):**
+
+```
+Fuente 12V (+) ────────────→ COM del relé
+Relé (NO) ─────────────────→ Cable ROJO de la electroválvula
+Fuente 12V (-) ────────────→ Cable NEGRO de la electroválvula
+```
+
+**Diagrama completo:**
+
+```
+┌──────────┐
+│Fuente 12V│
+│  + | -   │
+└──┬───┬───┘
+   │   │
+   │   └──────────────────────┐
+   │                          │
+   │   ┌──────────────┐       │
+   └──→│Relé          │       │
+       │ COM  NO  NC  │       │
+       └───────┬──────┘       │
+               │              │
+               ▼              ▼
+       ┌──────────────────────┐
+       │   Electroválvula     │
+       │   ROJO(+)  NEGRO(-)  │
+       └──────────────────────┘
+```
+
+**Con tus manos:**
+1. Cable de +12V → borne COM del relé (ajustar con destornillador)
+2. Cable de NO del relé → cable rojo de la electroválvula
+3. Cable de GND 12V → cable negro de la electroválvula
+
+---
+
+### 🧩 PASO 9 — Ejecutar el Código
+
+**En la terminal escribir:**
+
+```bash
+sudo python3 regar.py
+```
+
+---
+
+### 🧩 PASO 10 — ¿Qué Pasa Físicamente?
+
+**Cuando ejecutás el código, esto ocurre:**
+
+```
+1. Python ejecuta la línea:
+   GPIO.output(17, 1)
+
+2. Físicamente:
+   El pin GPIO17 sube a 3.3V
+   ↓
+   Esa señal llega al relé por el cable amarillo
+   ↓
+   El relé hace "CLIC" (sonido mecánico)
+   ↓
+   El relé cierra el circuito de 12V
+   ↓
+   Los 12V llegan a la electroválvula
+   ↓
+   La electroválvula se ABRE
+   ↓
+   💧 CORRE AGUA
+
+3. Después de 2 segundos:
+   GPIO.output(17, 0)
+   ↓
+   GPIO17 baja a 0V
+   ↓
+   El relé hace "CLIC" otra vez
+   ↓
+   El relé abre el circuito de 12V
+   ↓
+   La electroválvula se CIERRA
+   ↓
+   ⛔ SE CORTA EL AGUA
+```
+
+---
+
+### 📊 Flujo Completo: Del Código al Agua
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  TU CÓDIGO EN PYTHON                                    │
+│  GPIO.output(17, 1)  →  Encender pin 17                 │
+└────────────────┬────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────┐
+│  RASPBERRY PI                                           │
+│  Pin 11 (GPIO17) pasa de 0V → 3.3V                     │
+└────────────────┬────────────────────────────────────────┘
+                 │
+                 ▼ (cable amarillo)
+┌─────────────────────────────────────────────────────────┐
+│  MÓDULO RELÉ                                            │
+│  Recibe señal 3.3V → Activa bobina → Hace "CLIC"       │
+└────────────────┬────────────────────────────────────────┘
+                 │
+                 ▼ (cierra circuito de 12V)
+┌─────────────────────────────────────────────────────────┐
+│  ELECTROVÁLVULA                                         │
+│  Recibe 12V → Abre el paso de agua                     │
+└────────────────┬────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────┐
+│  💧 AGUA FLUYE HACIA TUS PLANTAS                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🎯 Resumen en 3 Capas
+
+**Capa 1: SOFTWARE**
+- Python controla los pines GPIO
+- `GPIO.output(17, 1)` = encender
+- `GPIO.output(17, 0)` = apagar
+
+**Capa 2: ELECTRÓNICA**
+- Raspberry Pi (3.3V) controla el relé
+- Relé (switch) controla electroválvula (12V)
+- Separación de circuitos para seguridad
+
+**Capa 3: FÍSICA**
+- Electroválvula abre/cierra paso de agua
+- Agua va desde canilla → electroválvula → planta
+- Todo automatizado sin intervención humana
+
+---
+
+### ✅ Verificación Paso a Paso
+
+Para saber que funciona:
+
+| Paso | ¿Qué verificar? | ✅ OK |
+|------|----------------|-------|
+| 1 | Raspberry enciende (LED rojo) | |
+| 2 | Linux arranca en pantalla | |
+| 3 | Terminal funciona | |
+| 4 | Script no da errores | |
+| 5 | Relé hace "CLIC" | |
+| 6 | LED del relé enciende | |
+| 7 | Electroválvula abre (se siente) | |
+| 8 | Sale agua por la manguera | |
+
+---
+
+**💡 Esto es todo lo que necesitás entender para que funcione el sistema.**
+
+El resto (logs, estadísticas, programación por horarios) son mejoras que se agregan sobre esta base.
 
 ---
 
