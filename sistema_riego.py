@@ -7,11 +7,6 @@ Sistema de control de riego para 3 canteros usando Raspberry Pi 4.
 Controla electrovalvulas 12V mediante modulo de reles de 4 canales.
 Registra automaticamente el consumo de agua en formato CSV.
 
-Autor: Agustin Diez
-Fecha: Enero 2025
-Python: 3.7+
-Dependencias: Solo biblioteca estandar de Python
-"""
 
 import csv
 import os
