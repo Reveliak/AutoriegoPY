@@ -6,12 +6,17 @@ Sistema de Riego Inteligente Automatizado
 Sistema de control de riego para 3 canteros usando Raspberry Pi 4.
 Controla electrovalvulas 12V mediante modulo de reles de 4 canales.
 Registra automaticamente el consumo de agua en formato CSV.
-
+"""
 
 import csv
 import os
 import time
 from datetime import datetime
+try:
+    import urllib.request
+    import json
+except ImportError:
+    print("WARNING: urllib no disponible. Notificaciones deshabilitadas.")
 
 
 # ============================================================================
@@ -20,6 +25,13 @@ from datetime import datetime
 
 # Modo de operacion: True para simulacion (sin hardware), False para GPIO real
 MODO_SIMULACION = True
+
+# URL del webhook de Make.com para notificaciones por email
+# IMPORTANTE: Reemplazar con tu URL de Make.com
+WEBHOOK_MAKE_URL = "https://hook.eu1.make.com/ku3rb5okwoyogpyxeqw7rfouojivkgih"
+
+# Habilitar/deshabilitar notificaciones por email
+NOTIFICACIONES_HABILITADAS = True
 
 # Configuracion de canteros (GPIO y caudal)
 CANTEROS = {
@@ -211,6 +223,60 @@ class DataLogger:
 
 
 # ============================================================================
+# NOTIFICACIONES - Sistema de notificaciones por email via Make.com
+# ============================================================================
+
+def enviar_notificacion_email(cantero, duracion_min, volumen_ml, fecha_hora, estado="completado"):
+    """
+    Envia notificacion por email via Make.com cuando termina un riego.
+
+    Args:
+        cantero (str): Nombre del cantero regado
+        duracion_min (float): Duracion del riego en minutos
+        volumen_ml (int): Volumen de agua aplicado en mililitros
+        fecha_hora (str): Timestamp del riego
+        estado (str): Estado del riego (completado/error)
+    """
+    if not NOTIFICACIONES_HABILITADAS:
+        return
+
+    if WEBHOOK_MAKE_URL == "TU_URL_DE_MAKE_AQUI":
+        print("[INFO] Notificaciones deshabilitadas: configura WEBHOOK_MAKE_URL")
+        return
+
+    try:
+        # Preparar datos para enviar
+        datos = {
+            "cantero": cantero,
+            "duracion_min": round(duracion_min, 2),
+            "volumen_ml": volumen_ml,
+            "volumen_litros": round(volumen_ml / 1000, 2),
+            "fecha_hora": fecha_hora,
+            "estado": estado
+        }
+
+        # Convertir a JSON
+        datos_json = json.dumps(datos).encode('utf-8')
+
+        # Crear request HTTP POST
+        req = urllib.request.Request(
+            WEBHOOK_MAKE_URL,
+            data=datos_json,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        # Enviar request
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                print(f"[NOTIFICACION] Email enviado correctamente para {cantero}")
+            else:
+                print(f"[NOTIFICACION] Error al enviar email: HTTP {response.status}")
+
+    except Exception as e:
+        print(f"[NOTIFICACION] Error al enviar notificacion: {e}")
+
+
+# ============================================================================
 # IRRIGATION CONTROLLER - Controlador principal de riego
 # ============================================================================
 
@@ -325,6 +391,10 @@ class IrrigationController:
 
             print(f"Riego completado: {volumen_ml} ml aplicados")
 
+            # Enviar notificacion por email
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            enviar_notificacion_email(nombre, duracion_min, volumen_ml, timestamp, "completado")
+
             return {
                 "cantero": nombre,
                 "duracion_min": duracion_min,
@@ -341,6 +411,10 @@ class IrrigationController:
             self.logger.registrar_riego(
                 cantero_num, duracion_min, 0, estado="error"
             )
+
+            # Enviar notificacion de error por email
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            enviar_notificacion_email(nombre, duracion_min, 0, timestamp, f"error: {str(e)}")
 
             return {
                 "cantero": nombre,
